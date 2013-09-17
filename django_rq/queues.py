@@ -118,9 +118,16 @@ def get_queue(name='default', default_timeout=None, async=None,
 
 
 def get_connection_queue_names(connection):
-    queues = dict.fromkeys([q.split(":")[-1] for q in connection.keys("rq:queue:*")], "-")
-    workers = Counter([q.split(":")[-1].split(".")[0] for q in connection.keys("rq:worker:*")])
-    queues.update(workers)
+    queues = Counter([q.split(":")[-1] for q in connection.keys("rq:queue:*")])
+
+    workers = connection.smembers("rq:workers")
+    for worker in workers:
+        queue = connection.hget(worker, 'queues')
+        if not queue:
+            continue
+        for queue in queue.split(","):
+            queues[queue] += 1
+
     return queues
 
 
