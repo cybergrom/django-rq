@@ -33,12 +33,12 @@
                 {% for queue in queues %}
                     <tr class = "{% cycle 'row1' 'row2' %}">
                         <th>
-                            <a href = "{% url 'rq_jobs' queue.index %}">
-                                {{ queue.name }}
+                            <a href = "{% url 'rq_jobs' queue.connection_name queue.name %}">
+                                {{ queue.connection_name }}.{{ queue.name }}
                             </a>
                         </th>
-                        <td>{{ queue.jobs }}</td>
-                        <td>{{ queue.workers }}</td>
+                        <td>{{ queue.jobs_count }}</td>
+                        <td>{{ queue.workers_count }}</td>
                     </tr>
                 {% endfor %}
             </tbody>

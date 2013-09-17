@@ -85,7 +85,7 @@ LOGGING = {
     }
 }
 
-RQ_QUEUES = {
+RQ_CONNECTIONS = {
     'default': {
         'HOST': 'localhost',
         'PORT': 6379,
@@ -128,9 +128,9 @@ RQ = {
 }
 
 if REDIS_CACHE_TYPE == 'django-redis':
-    RQ_QUEUES['django-redis'] = {'USE_REDIS_CACHE': 'django-redis'}
+    RQ_CONNECTIONS['django-redis'] = {'USE_REDIS_CACHE': 'django-redis'}
 elif REDIS_CACHE_TYPE == 'django-redis-cache':
-    RQ_QUEUES['django-redis-cache'] = {'USE_REDIS_CACHE': 'django-redis-cache'}
+    RQ_CONNECTIONS['django-redis-cache'] = {'USE_REDIS_CACHE': 'django-redis-cache'}
 
 ROOT_URLCONF = 'django_rq.tests.urls'
 

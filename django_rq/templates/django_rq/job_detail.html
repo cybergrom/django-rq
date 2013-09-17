@@ -20,8 +20,8 @@
     <div class="breadcrumbs">
         <a href="{% url 'admin:index' %}">Home</a> &rsaquo;
         <a href="{% url 'rq_home' %}">Django RQ</a> &rsaquo;
-        <a href = "{% url 'rq_jobs' queue_index %}">{{ queue.name }}</a> &rsaquo;
-        <a href = "{% url 'rq_job_detail' queue_index job.id %}">{{ job.id }}</a>
+        <a href = "{% url 'rq_jobs' queue.connection_name queue.name %}">{{ queue.name }}</a> &rsaquo;
+        <a href = "{% url 'rq_job_detail' queue.connection_name queue.name job.id %}">{{ job.id }}</a>
     </div>
 {% endblock %}
 
@@ -133,7 +133,7 @@
     <div class="submit-row">
         <p class="deletelink-box"><a href="delete/" class="deletelink">Delete</a></p>
         {% if job.is_failed %}
-            <form method = 'POST' action = "{% url 'rq_requeue_job' queue_index job.id %}">
+            <form method = 'POST' action = "{% url 'rq_requeue_job' queue.connection_name queue.name job.id %}">
                 {% csrf_token %}
                 <input type="submit" value="Requeue" class="default" name="requeue">
             </form>

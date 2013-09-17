@@ -59,7 +59,7 @@ class Command(BaseCommand):
             help='Run worker in burst mode'
         ),
     )
-    args = '<queue queue ...>'
+    args = '<connection.queue connection.queue ...>'
 
     def handle(self, *args, **options):
         try:

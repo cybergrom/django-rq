@@ -13,8 +13,7 @@ from rq.job import Job
 
 from django_rq.decorators import job
 from django_rq.queues import (
-    get_connection, get_queue, get_queue_by_index, get_queues,
-    get_unique_connection_configs
+    get_connection, get_queue, get_queues,
 )
 from django_rq import thread_queue
 from django_rq.workers import get_worker
@@ -27,7 +26,7 @@ try:
 except ImportError:
     RQ_SCHEDULER_INSTALLED = False
 
-QUEUES = settings.RQ_QUEUES
+CONNECTIONS = settings.RQ_CONNECTIONS
 
 
 def access_self():
@@ -39,38 +38,6 @@ def divide(a, b):
     return a / b
 
 
-def get_failed_queue_index(name='default'):
-    """
-    Returns the position of FailedQueue for the named queue in QUEUES_LIST
-    """
-    # Get the index of FailedQueue for 'default' Queue in QUEUES_LIST
-    queue_index = None
-    connection = get_connection(name)
-    connection_kwargs = connection.connection_pool.connection_kwargs
-    for i in range(0, 100):
-        q = get_queue_by_index(i)
-        if q.name == 'failed' and q.connection.connection_pool.connection_kwargs == connection_kwargs:
-            queue_index = i
-            break
-
-    return queue_index
-
-
-def get_queue_index(name='default'):
-    """
-    Returns the position of Queue for the named queue in QUEUES_LIST
-    """
-    queue_index = None
-    connection = get_connection(name)
-    connection_kwargs = connection.connection_pool.connection_kwargs
-    for i in range(0, 100):
-        q = get_queue_by_index(i)
-        if q.name == name and q.connection.connection_pool.connection_kwargs == connection_kwargs:
-            queue_index = i
-            break
-    return queue_index
-
-
 @override_settings(RQ={'AUTOCOMMIT': True})
 class QueuesTest(TestCase):
 
@@ -79,7 +46,7 @@ class QueuesTest(TestCase):
         Test that get_connection returns the right connection based for
         `defaut` queue.
         """
-        config = QUEUES['default']
+        config = CONNECTIONS['default']
         connection = get_connection()
         connection_kwargs = connection.connection_pool.connection_kwargs
         self.assertEqual(connection_kwargs['host'], config['HOST'])
@@ -91,7 +58,7 @@ class QueuesTest(TestCase):
         Test that get_connection returns the right connection based for
         `test` queue.
         """
-        config = QUEUES['test']
+        config = CONNECTIONS['test']
         connection = get_connection('test')
         connection_kwargs = connection.connection_pool.connection_kwargs
         self.assertEqual(connection_kwargs['host'], config['HOST'])
@@ -103,7 +70,7 @@ class QueuesTest(TestCase):
         Test that get_queue use the right parameters for `default`
         connection.
         """
-        config = QUEUES['default']
+        config = CONNECTIONS['default']
         queue = get_queue('default')
         connection_kwargs = queue.connection.connection_pool.connection_kwargs
         self.assertEqual(queue.name, 'default')
@@ -111,15 +78,14 @@ class QueuesTest(TestCase):
         self.assertEqual(connection_kwargs['port'], config['PORT'])
         self.assertEqual(connection_kwargs['db'], config['DB'])
 
-    def test_get_queue_url(self):
+    def test_get_connection_url(self):
         """
         Test that get_queue use the right parameters for queues using URL for
         connection.
         """
-        config = QUEUES['url']
-        queue = get_queue('url')
+        queue = get_queue('default', connection_name='url')
         connection_kwargs = queue.connection.connection_pool.connection_kwargs
-        self.assertEqual(queue.name, 'url')
+        self.assertEqual(queue.name, 'default')
         self.assertEqual(connection_kwargs['host'], 'host')
         self.assertEqual(connection_kwargs['port'], 1234)
         self.assertEqual(connection_kwargs['db'], 4)
@@ -130,8 +96,8 @@ class QueuesTest(TestCase):
         Test that get_queue use the right parameters for `test`
         connection.
         """
-        config = QUEUES['test']
-        queue = get_queue('test')
+        config = CONNECTIONS['test']
+        queue = get_queue('test', connection_name='test')
         connection_kwargs = queue.connection.connection_pool.connection_kwargs
         self.assertEqual(queue.name, 'test')
         self.assertEqual(connection_kwargs['host'], config['HOST'])
@@ -149,48 +115,22 @@ class QueuesTest(TestCase):
         Checks that getting queues with different redis connections raise
         an exception.
         """
-        self.assertRaises(ValueError, get_queues, 'default', 'test')
-
-
-    def test_get_unique_connection_configs(self):
-        connection_params_1 = {
-            'HOST': 'localhost',
-            'PORT': 6379,
-            'DB': 0,
-        }
-        connection_params_2 = {
-            'HOST': 'localhost',
-            'PORT': 6379,
-            'DB': 1,
-        }
-        config = {
-            'default': connection_params_1,
-            'test': connection_params_2
-        }
-        self.assertEqual(get_unique_connection_configs(config),
-                         [connection_params_1, connection_params_2])
-        config = {
-            'default': connection_params_1,
-            'test': connection_params_1
-        }
-        # Should return one connection config since it filters out duplicates
-        self.assertEqual(get_unique_connection_configs(config),
-                         [connection_params_1])
+        self.assertRaises(ValueError, get_queues, 'default.test', 'test.test')
 
     def test_async(self):
         """
         Checks whether asynchronous settings work
         """
         # Make sure async is not set by default
-        defaultQueue = get_queue('default')
+        defaultQueue = get_queue('default', connection_name='default')
         self.assertTrue(defaultQueue._async)
 
         # Make sure async override works
-        defaultQueueAsync = get_queue('default', async=False)
+        defaultQueueAsync = get_queue('default', async=False, connection_name='default')
         self.assertFalse(defaultQueueAsync._async)
 
         # Make sure async setting works
-        asyncQueue = get_queue('async')
+        asyncQueue = get_queue('async', connection_name='async')
         self.assertFalse(asyncQueue._async)
 
     @override_settings(RQ={'AUTOCOMMIT': False})
@@ -219,8 +159,8 @@ class DecoratorTest(TestCase):
     def test_job_decorator(self):
         # Ensure that decorator passes in the right queue from settings.py
         queue_name = 'test3'
-        config = QUEUES[queue_name]
-        @job(queue_name)
+        config = CONNECTIONS[queue_name]
+        @job(queue_name, queue_name)
         def test():
             pass
         result = test.delay()
@@ -239,9 +179,9 @@ class DecoratorTest(TestCase):
 
 
 class ConfigTest(TestCase):
-    @override_settings(RQ_QUEUES=None)
+    @override_settings(RQ_CONNECTIONS=None)
     def test_empty_queue_setting_raises_exception(self):
-        # Raise an exception if RQ_QUEUES is not defined
+        # Raise an exception if RQ_CONNECTIONS is not defined
         self.assertRaises(ImproperlyConfigured, get_connection)
 
 
@@ -295,15 +235,14 @@ class ViewTest(TestCase):
         """
         def failing_job():
             raise ValueError
-        
+
         queue = get_queue('default')
-        queue_index = get_failed_queue_index('default')
         job = queue.enqueue(failing_job)
         worker = get_worker('default')
         worker.work(burst=True)
         job.refresh()
         self.assertTrue(job.is_failed)
-        self.client.post(reverse('rq_requeue_job', args=[queue_index, job.id]),
+        self.client.post(reverse('rq_requeue_job', args=[queue.connection_name, queue.name, job.id]),
                          {'requeue': 'Requeue'})
         self.assertIn(job, queue.jobs)
         job.delete()
@@ -314,9 +253,8 @@ class ViewTest(TestCase):
         deleted from Queue.
         """
         queue = get_queue('django_rq_test')
-        queue_index = get_queue_index('django_rq_test')
         job = queue.enqueue(access_self)
-        self.client.post(reverse('rq_delete_job', args=[queue_index, job.id]),
+        self.client.post(reverse('rq_delete_job', args=[queue.connection_name, queue.name, job.id]),
                          {'post': 'yes'})
         self.assertFalse(Job.exists(job.id, connection=queue.connection))
         self.assertNotIn(job.id, queue.job_ids)
@@ -400,10 +338,10 @@ class SchedulerTest(TestCase):
         Ensure get_scheduler creates a scheduler instance with the right
         connection params for `test` queue.
         """
-        config = QUEUES['test']
-        scheduler = get_scheduler('test')
+        config = CONNECTIONS['test']
+        scheduler = get_scheduler('test', 'test_queue')
         connection_kwargs = scheduler.connection.connection_pool.connection_kwargs
-        self.assertEqual(scheduler.queue_name, 'test')
+        self.assertEqual(scheduler.queue_name, 'test_queue')
         self.assertEqual(connection_kwargs['host'], config['HOST'])
         self.assertEqual(connection_kwargs['port'], config['PORT'])
         self.assertEqual(connection_kwargs['db'], config['DB'])
@@ -417,14 +355,15 @@ class RedisCacheTest(TestCase):
         """
         Test that the USE_REDIS_CACHE option for configuration works.
         """
-        queueName = 'django-redis'
-        queue = get_queue(queueName)
+        connectionName = 'django-redis'
+        queueName = 'django-redis-queue'
+        queue = get_queue(queueName, connection_name=connectionName)
         connection_kwargs = queue.connection.connection_pool.connection_kwargs
         self.assertEqual(queue.name, queueName)
 
-        cacheHost = settings.CACHES[queueName]['LOCATION'].split(':')[0]
-        cachePort = settings.CACHES[queueName]['LOCATION'].split(':')[1]
-        cacheDBNum = settings.CACHES[queueName]['LOCATION'].split(':')[2]
+        cacheHost = settings.CACHES[connectionName]['LOCATION'].split(':')[0]
+        cachePort = settings.CACHES[connectionName]['LOCATION'].split(':')[1]
+        cacheDBNum = settings.CACHES[connectionName]['LOCATION'].split(':')[2]
 
         self.assertEqual(connection_kwargs['host'], cacheHost)
         self.assertEqual(connection_kwargs['port'], int(cachePort))
@@ -437,14 +376,15 @@ class RedisCacheTest(TestCase):
         """
         Test that the USE_REDIS_CACHE option for configuration works.
         """
-        queueName = 'django-redis-cache'
-        queue = get_queue(queueName )
+        connectionName = 'django-redis-cache'
+        queueName = 'django-redis-cache-queue'
+        queue = get_queue(queueName, connection_name=connectionName)
         connection_kwargs = queue.connection.connection_pool.connection_kwargs
         self.assertEqual(queue.name, queueName)
 
-        cacheHost = settings.CACHES[queueName]['LOCATION'].split(':')[0]
-        cachePort = settings.CACHES[queueName]['LOCATION'].split(':')[1]
-        cacheDBNum = settings.CACHES[queueName]['OPTIONS']['DB']
+        cacheHost = settings.CACHES[connectionName]['LOCATION'].split(':')[0]
+        cachePort = settings.CACHES[connectionName]['LOCATION'].split(':')[1]
+        cacheDBNum = settings.CACHES[connectionName]['OPTIONS']['DB']
 
         self.assertEqual(connection_kwargs['host'], cacheHost)
         self.assertEqual(connection_kwargs['port'], int(cachePort))

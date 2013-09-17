@@ -1,3 +1,4 @@
+from collections import Counter
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
@@ -22,6 +23,18 @@ def get_commit_mode():
     return RQ.get('AUTOCOMMIT', True)
 
 
+class DjangoFailedRQ(FailedQueue):
+    def __init__(self, *args, **kwargs):
+        from .settings import CONNECTIONS
+        self.connection_name = kwargs.pop('connection_name')
+        kwargs['connection'] = get_redis_connection(CONNECTIONS[self.connection_name])
+        super(DjangoFailedRQ, self).__init__(*args, **kwargs)
+
+    @property
+    def jobs_count(self):
+        return len(self.jobs)
+
+
 class DjangoRQ(Queue):
     """
     A subclass of RQ's QUEUE that allows jobs to be stored temporarily to be
@@ -29,7 +42,10 @@ class DjangoRQ(Queue):
     """
 
     def __init__(self, *args, **kwargs):
-        autocommit = kwargs.pop('autocommit', None)
+        from .settings import CONNECTIONS
+        self.connection_name = kwargs.pop('connection_name', None)
+        kwargs['connection'] = get_redis_connection(CONNECTIONS[self.connection_name])
+        autocommit = kwargs.pop('autocommit', True)
         self._autocommit = get_commit_mode() if autocommit is None else autocommit
         return super(DjangoRQ, self).__init__(*args, **kwargs)
 
@@ -42,6 +58,10 @@ class DjangoRQ(Queue):
             return self.original_enqueue_call(*args, **kwargs)
         else:
             thread_queue.add(self, args, kwargs)
+
+    @property
+    def jobs_count(self):
+        return len(self.jobs)
 
 
 def get_redis_connection(config):
@@ -76,53 +96,30 @@ def get_connection(name='default'):
     """
     Returns a Redis connection to use based on parameters in settings.RQ_QUEUES
     """
-    from .settings import QUEUES
-    return get_redis_connection(QUEUES[name])
+    from .settings import CONNECTIONS
+    return get_redis_connection(CONNECTIONS[name])
 
-
-def get_connection_by_index(index):
-    """
-    Returns a Redis connection to use based on parameters in settings.RQ_QUEUES
-    """
-    from .settings import QUEUES_LIST
-    return get_redis_connection(QUEUES_LIST[index]['connection_config'])
 
 
 def get_queue(name='default', default_timeout=None, async=None,
-              autocommit=None):
+              autocommit=None, connection_name='default'):
     """
     Returns an rq Queue using parameters defined in ``RQ_QUEUES``
     """
-    from .settings import QUEUES
+    from .settings import CONNECTIONS
 
     # If async is provided, use it, otherwise, get it from the configuration
     if async is None:
-        async = QUEUES[name].get('ASYNC', True)
+        async = CONNECTIONS[connection_name].get('ASYNC', True)
 
     return DjangoRQ(name, default_timeout=default_timeout,
-                    connection=get_connection(name), async=async,
+                    connection_name=connection_name, async=async,
                     autocommit=autocommit)
 
 
-def get_queue_by_index(index):
-    """
-    Returns an rq Queue using parameters defined in ``QUEUES_LIST``
-    """
-    from .settings import QUEUES_LIST
-    config = QUEUES_LIST[int(index)]
-    if config['name'] == 'failed':
-        return FailedQueue(connection=get_redis_connection(config['connection_config']))
-    return DjangoRQ(
-        config['name'],
-        connection=get_redis_connection(config['connection_config']),
-        async=config.get('ASYNC', True))
-
-
-def get_failed_queue(name='default'):
-    """
-    Returns the rq failed Queue using parameters defined in ``RQ_QUEUES``
-    """
-    return FailedQueue(connection=get_connection(name))
+def get_connection_queue_names(connection):
+    return Counter([q.split(":")[-1].split(".")[0]
+                    for q in connection.keys("rq:worker:*")])
 
 
 def get_queues(*queue_names, **kwargs):
@@ -130,20 +127,28 @@ def get_queues(*queue_names, **kwargs):
     Return queue instances from specified queue names.
     All instances must use the same Redis connection.
     """
-    from .settings import QUEUES
+    from .settings import CONNECTIONS
     autocommit = kwargs.get('autocommit', None)
     if len(queue_names) == 0:
-        # Return "default" queue if no queue name is specified
         return [get_queue(autocommit=autocommit)]
-    if len(queue_names) > 1:
-        connection_params = QUEUES[queue_names[0]]
+    else:
+        queues = []
+        connections = set()
+
         for name in queue_names:
-            if QUEUES[name] != connection_params:
-                raise ValueError(
-                    'Queues must have the same redis connection.'
-                    '"{0}" and "{1}" have '
-                    'different connections'.format(name, queue_names[0]))
-    return [get_queue(name, autocommit=autocommit) for name in queue_names]
+            if "." in name:
+                connection_name, name = name.split(".")
+            else:
+                connection_name = 'default'
+            if not connection_name in CONNECTIONS:
+                raise ValueError('Unknown connection %s.' % connection_name)
+            connections.add(connection_name)
+            queues.append(get_queue(name, autocommit=autocommit, connection_name=connection_name))
+
+        if len(connections) > 1:
+            raise ValueError('Queues must have the same redis connection.')
+
+        return queues
 
 
 def enqueue(func, *args, **kwargs):
@@ -156,20 +161,6 @@ def enqueue(func, *args, **kwargs):
     return get_queue().enqueue(func, *args, **kwargs)
 
 
-def get_unique_connection_configs(config=None):
-    """
-    Returns a list of unique Redis connections from config
-    """
-    if config is None:
-        from .settings import QUEUES
-        config = QUEUES
-
-    connection_configs = []
-    for key, value in config.items():
-        if value not in connection_configs:
-            connection_configs.append(value)
-    return connection_configs
-
 
 """
 If rq_scheduler is installed, provide a ``get_scheduler`` function that
@@ -179,13 +170,19 @@ instance instead of a ``Queue`` instance.
 try:
     from rq_scheduler import Scheduler
 
-    def get_scheduler(name='default', interval=60):
+    class DjangoScheduler(Scheduler):
+        def __init__(self, *args, **kwargs):
+            from .settings import CONNECTIONS
+            self.connection_name = kwargs.pop('connection_name')
+            kwargs['connection'] = get_redis_connection(CONNECTIONS[self.connection_name])
+            super(DjangoScheduler, self).__init__(*args, **kwargs)
+
+    def get_scheduler(connection_name='default', name='default', interval=60):
         """
         Returns an RQ Scheduler instance using parameters defined in
         ``RQ_QUEUES``
         """
-        return Scheduler(name, interval=interval,
-                         connection=get_connection(name))
+        return DjangoScheduler(name, interval=interval, connection_name=connection_name)
 except ImportError:
     def get_scheduler(*args, **kwargs):
         raise ImproperlyConfigured('rq_scheduler not installed')

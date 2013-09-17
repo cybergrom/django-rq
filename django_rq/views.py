@@ -2,43 +2,37 @@ from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.shortcuts import redirect, render
 
-from rq import requeue_job, Worker
+from rq import requeue_job
 from rq.job import Job
 
-from .queues import get_connection, get_queue_by_index
-from .settings import QUEUES_LIST
+from .queues import get_redis_connection, get_connection_queue_names, DjangoRQ, DjangoFailedRQ
+from .settings import CONNECTIONS
 
 
 @staff_member_required
 def stats(request):
     queues = []
-    for index, config in enumerate(QUEUES_LIST):
-        queue = get_queue_by_index(index)
-        queue_data = {
-            'name': queue.name,
-            'jobs': queue.count,
-            'index': index,
-        }
-        if queue.name == 'failed':
-            queue_data['workers'] = '-'
-        else:
-            connection = get_connection(queue.name)
-            all_workers = Worker.all(connection=connection)
-            queue_workers = [worker for worker in all_workers if queue in worker.queues]
-            queue_data['workers'] = len(queue_workers)
-        queues.append(queue_data)
+    for c_name, config in CONNECTIONS.items():
+        connection = get_redis_connection(config)
+        for q_name, workers in get_connection_queue_names(connection).items():
+            q = DjangoRQ(c_name, connection_name=c_name)
+            q.workers_count = workers
+            queues.append(q)
+        q = DjangoFailedRQ(connection_name=c_name)
+        q.workers_count = "-"
+        queues.append(q)
 
     context_data = {'queues': queues}
     return render(request, 'django_rq/stats.html', context_data)
 
 
 @staff_member_required
-def jobs(request, queue_index):
-    queue_index = int(queue_index)
-    queue = get_queue_by_index(queue_index)
+def jobs(request, queue_connection, queue_name):
+    queue = DjangoRQ(queue_name, connection_name=queue_connection)
     context_data = {
         'queue': queue,
-        'queue_index': queue_index,
+        'queue_name': queue_name,
+        'queue_connection': queue_connection,
         'jobs': queue.jobs,
     }
 
@@ -46,12 +40,12 @@ def jobs(request, queue_index):
 
 
 @staff_member_required
-def job_detail(request, queue_index, job_id):
-    queue_index = int(queue_index)
-    queue = get_queue_by_index(queue_index)
+def job_detail(request, queue_connection, queue_name, job_id):
+    queue = DjangoRQ(queue_name, connection_name=queue_connection)
     job = Job.fetch(job_id, connection=queue.connection)
     context_data = {
-        'queue_index': queue_index,
+        'queue_name': queue_name,
+        'queue_connection': queue_connection,
         'job': job,
         'queue': queue,
     }
@@ -59,9 +53,8 @@ def job_detail(request, queue_index, job_id):
 
 
 @staff_member_required
-def delete_job(request, queue_index, job_id):
-    queue_index = int(queue_index)
-    queue = get_queue_by_index(queue_index)
+def delete_job(request, queue_connection, queue_name, job_id):
+    queue = DjangoRQ(queue_name, connection_name=queue_connection)
     job = Job.fetch(job_id, connection=queue.connection)
 
     if request.POST:
@@ -69,10 +62,11 @@ def delete_job(request, queue_index, job_id):
         queue.connection._lrem(queue.key, 0, job.id)
         job.delete()
         messages.info(request, 'You have successfully deleted %s' % job.id)
-        return redirect('rq_jobs', queue_index)
+        return redirect('rq_jobs', queue_connection, queue_name)
 
     context_data = {
-        'queue_index': queue_index,
+        'queue_name': queue_name,
+        'queue_connection': queue_connection,
         'job': job,
         'queue': queue,
     }
@@ -80,17 +74,17 @@ def delete_job(request, queue_index, job_id):
 
 
 @staff_member_required
-def requeue_job_view(request, queue_index, job_id):
-    queue_index = int(queue_index)
-    queue = get_queue_by_index(queue_index)
+def requeue_job_view(request, queue_connection, queue_name, job_id):
+    queue = DjangoRQ(queue_name, connection_name=queue_connection)
     job = Job.fetch(job_id, connection=queue.connection)
     if request.POST:
         requeue_job(job_id, connection=queue.connection)
         messages.info(request, 'You have successfully requeued %s' % job.id)
-        return redirect('rq_job_detail', queue_index, job_id)
+        return redirect('rq_job_detail', queue_connection, queue_name, job_id)
 
     context_data = {
-        'queue_index': queue_index,
+        'queue_name': queue_name,
+        'queue_connection': queue_connection,
         'job': job,
         'queue': queue,
     }

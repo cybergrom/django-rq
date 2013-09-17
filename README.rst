@@ -39,7 +39,7 @@ Installation
 
 .. code-block:: python
 
-    RQ_QUEUES = {
+    RQ_CONNECTIONS = {
         'default': {
             'HOST': 'localhost',
             'PORT': 6379,
@@ -76,39 +76,40 @@ Putting jobs in the queue
 `Django-RQ` allows you to easily put jobs into any of the queues defined in
 ``settings.py``. It comes with a few utility functions:
 
-* ``enqueue`` - push a job to the ``default`` queue:
+* ``enqueue`` - push a job to the ``default`` queue of ``default`` connection:
 
 .. code-block:: python
 
     import django_rq
     django_rq.enqueue(func, foo, bar=baz)
 
-* ``get_queue`` - accepts a single queue name argument (defaults to "default")
-  and returns an `RQ` ``Queue`` instance for you to queue jobs into:
+* ``get_queue`` - accepts a single queue and connection name arguments
+  (defaults to "default") and returns an `RQ` ``Queue`` instance for you
+  to queue jobs into:
 
 .. code-block:: python
 
     import django_rq
-    queue = django_rq.get_queue('high')
+    queue = django_rq.get_queue('high', connection_name='redis')
     queue.enqueue(func, foo, bar=baz)
 
-* ``get_connection`` - accepts a single queue name argument (defaults to "default")
-  and returns a connection to the queue's `Redis`_ server:
+* ``get_connection`` - accepts a single connection name argument (defaults
+  to "default") and returns a connection to the queue's `Redis`_ server:
 
 .. code-block:: python
 
     import django_rq
     redis_conn = django_rq.get_connection('high')
 
-* ``get_worker`` - accepts optional queue names and returns a new `RQ`
-  ``Worker`` instance for specified queues (or ``default`` queue):
+* ``get_worker`` - accepts optional combination of connection and queue names
+  and returns a new `RQ` ``Worker`` instance for specified queues (or ``default`` queue):
 
 .. code-block:: python
 
     import django_rq
     worker = django_rq.get_worker() # Returns a worker for "default" queue
     worker.work()
-    worker = django_rq.get_worker('low', 'high') # Returns a worker for "low" and "high"
+    worker = django_rq.get_worker('default.low', 'redis.high') # Returns a worker for "low" and "high"
 
 
 @job decorator
@@ -126,7 +127,7 @@ decorator that comes with ``django_rq``:
         pass
     long_running_func.delay() # Enqueue function in "default" queue
 
-    @job('high')
+    @job('high', connection_name='default')
     def long_running_func():
         pass
     long_running_func.delay() # Enqueue function in "high" queue
@@ -137,23 +138,23 @@ Running workers
 django_rq provides a management command that starts a worker for every queue
 specified as arguments::
 
-    python manage.py rqworker high default low
+    python manage.py rqworker default.high default.default default.low
 
 If you want to run ``rqworker`` in burst mode, you can pass in the ``--burst`` flag::
 
-    python manage.py rqworker high default low --burst
+    python manage.py rqworker default.high default.default low --burst
 
 Support for RQ Scheduler
 ------------------------
 
 If you have `RQ Scheduler <https://github.com/ui/rq-scheduler>`_ installed,
 you can also use the ``get_scheduler`` function to return a ``Scheduler``
-instance for queues defined in settings.py's ``RQ_QUEUES``. For example:
+instance for queues defined in settings.py's ``RQ_CONNECTIONS``. For example:
 
 .. code-block:: python
 
     import django_rq
-    scheduler = django_rq.get_scheduler('default')
+    scheduler = django_rq.get_scheduler('default', 'default')
     job = scheduler.enqueue_at(datetime(2020, 10, 10), func)
 
 Support for django-redis and django-redis-cache
@@ -167,7 +168,7 @@ of any optimization that may be going on in your cache setup (like using
 connection pooling or `Hiredis <https://github.com/redis/hiredis>`_.)
 
 To use configure it, use a dict with the key ``USE_REDIS_CACHE`` pointing to the
-name of the desired cache in your ``RQ_QUEUES`` dict. It goes without saying
+name of the desired cache in your ``RQ_CONNECTIONS`` dict. It goes without saying
 that the chosen cache must exist and use the Redis backend. See your respective
 Redis cache package docs for configuration instructions. It's also important to
 point out that since the django-redis-cache ``ShardedClient`` splits the cache
@@ -187,7 +188,7 @@ fragment for django-redis:
         },
     }
 
-    RQ_QUEUES = {
+    RQ_CONNECTIONS = {
         'high': {
             'USE_REDIS_CACHE': 'redis-cache',
         },
@@ -277,10 +278,10 @@ configuration in your settings file:
 
     # ... Logic to set DEBUG and TESTING settings to True or False ...
 
-    # ... Regular RQ_QUEUES setup code ...
+    # ... Regular RQ_CONNECTIONS setup code ...
 
     if DEBUG or TESTING:
-        for queueConfig in RQ_QUEUES.itervalues():
+        for queueConfig in RQ_CONNECTIONS.itervalues():
             queueConfig['ASYNC'] = False
 
 Note that setting the ``async`` parameter explicitly when calling ``get_queue``
@@ -297,6 +298,14 @@ To run ``django_rq``'s test suite::
 =========
 Changelog
 =========
+
+0.?.0
+-----
+* Dynamic QUEUE creation
+* Getting queues list from redis
+* ``RQ_QUEUES`` changed to `RQ_CONNECTIONS``
+* Added ``connection_name`` argument to specify queue location
+
 
 0.5.0
 -----
