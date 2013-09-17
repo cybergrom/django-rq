@@ -118,8 +118,10 @@ def get_queue(name='default', default_timeout=None, async=None,
 
 
 def get_connection_queue_names(connection):
-    return Counter([q.split(":")[-1].split(".")[0]
-                    for q in connection.keys("rq:worker:*")])
+    queues = dict.fromkeys([q.split(":")[-1] for q in connection.keys("rq:queue:*")], "-")
+    workers = Counter([q.split(":")[-1].split(".")[0] for q in connection.keys("rq:worker:*")])
+    queues.update(workers)
+    return queues
 
 
 def get_queues(*queue_names, **kwargs):

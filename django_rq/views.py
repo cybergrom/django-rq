@@ -15,13 +15,9 @@ def stats(request):
     for c_name, config in CONNECTIONS.items():
         connection = get_redis_connection(config)
         for q_name, workers in get_connection_queue_names(connection).items():
-            q = DjangoRQ(c_name, connection_name=c_name)
+            q = DjangoRQ(q_name, connection_name=c_name)
             q.workers_count = workers
             queues.append(q)
-        q = DjangoFailedRQ(connection_name=c_name)
-        q.workers_count = "-"
-        queues.append(q)
-
     context_data = {'queues': queues}
     return render(request, 'django_rq/stats.html', context_data)
 
