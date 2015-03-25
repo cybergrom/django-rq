@@ -86,10 +86,10 @@ def get_redis_connection(config):
         else:
             # We're using django-redis-cache
             return cache._client
-
+    options = dict([(k.lower(), v) for k, v in config.get('OPTIONS', {}).items()])
     return redis.Redis(host=config['HOST'],
                        port=config['PORT'], db=config['DB'],
-                       password=config.get('PASSWORD', None))
+                       password=config.get('PASSWORD', None), **options)
 
 
 def get_connection(name='default'):
