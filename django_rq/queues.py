@@ -146,7 +146,7 @@ def get_queues(*queue_names, **kwargs):
 
         for name in queue_names:
             if "." in name:
-                connection_name, name = name.split(".")
+                connection_name, name = name.split(".", 1)
             else:
                 connection_name = 'default'
             if not connection_name in CONNECTIONS:
