@@ -2,7 +2,7 @@ import logging
 from optparse import make_option
 
 from django.core.management.base import BaseCommand
-from django.utils.log import dictConfig
+from logging.config import dictConfig
 
 from redis.exceptions import ConnectionError
 
